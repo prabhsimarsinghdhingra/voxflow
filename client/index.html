@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VoxFlow</title>
+<style>
+:root{--bg:#E8EEF3;--ink:#0F1E2E;--mute:#52667A;--line:#C5D1DC;--v:#4B3FE0;--r:#D9486B}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:32px 20px}
+h1{margin:0 0 4px;font-size:32px;letter-spacing:-.02em}
+#talk{width:100%;padding:22px;font:600 18px inherit;border:0;border-radius:8px;background:var(--v);color:#fff;cursor:pointer;margin:20px 0}
+#talk.live{background:var(--r)}
+#talk:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+.box{background:#F7FAFC;border:1px solid var(--line);border-radius:6px;padding:14px 16px;margin-bottom:12px;min-height:52px}
+.box small{color:var(--mute);display:block}
+#m{font-variant-numeric:tabular-nums;color:var(--mute)}
+</style></head>
+<body><main>
+<h1>VoxFlow</h1>
+<div id="status" class="box" aria-live="polite">Connecting…</div>
+<button id="talk" disabled>Start talking</button>
+<div class="box"><small>You said</small><span id="you"></span></div>
+<div class="box"><small>VoxFlow</small><span id="bot"></span></div>
+<div class="box"><small>Last turn</small><span id="m">–</span></div>
+<script>
+const $ = id => document.getElementById(id);
+const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws?session=" + Math.random().toString(36).slice(2, 8));
+const play = new (window.AudioContext || webkitAudioContext)();
+let queue = [], playing = false, src = null, live = false, mic, node, stream;
+
+ws.onopen = () => { $("status").textContent = "Connected. Press the button, speak, press again to finish."; $("talk").disabled = false; };
+ws.onclose = () => { $("status").textContent = "Disconnected. Is the server running?"; $("talk").disabled = true; };
+ws.onmessage = async e => {
+  const m = JSON.parse(e.data);
+  if (m.type === "metrics") $("status").textContent = "Ready. Press the button to talk again.";
+  else if (m.type === "transcript") $("you").textContent = m.text;
+  else if (m.type === "token") $("bot").textContent += m.text;
+  else if (m.type === "audio") { queue.push(m); next(); }
+  else if (m.type === "speak_text") { speechSynthesis.speak(new SpeechSynthesisUtterance(m.text)); }
+  else if (m.type === "metrics") $("m").textContent = `first audio ${Math.round(m.e2e_ms)} ms · first token ${Math.round(m.ttft_ms)} ms · speech recognition ${Math.round(m.stt_ms)} ms${m.fallback ? " · fallback used" : ""}`;
+};
+async function next() {
+  if (playing || !queue.length) return;
+  playing = true;
+  const m = queue.shift(), bytes = Uint8Array.from(atob(m.data), c => c.charCodeAt(0));
+  try {
+    const buf = await play.decodeAudioData(bytes.buffer);
+    src = play.createBufferSource(); src.buffer = buf; src.connect(play.destination);
+    src.onended = () => { playing = false; next(); }; src.start();
+  } catch { playing = false; next(); }
+}
+function stopPlayback() { queue = []; try { src && src.stop(); } catch {} playing = false; speechSynthesis.cancel(); }
+
+const worklet = `class P extends AudioWorkletProcessor{process(i){const c=i[0][0];if(c){const o=new Int16Array(c.length);
+for(let k=0;k<c.length;k++){o[k]=Math.max(-1,Math.min(1,c[k]))*32767}this.port.postMessage(o.buffer,[o.buffer])}return true}}
+registerProcessor("p",P)`;
+$("talk").onclick = async () => {
+  await play.resume();
+  if (!live) {
+    if (!playing && !queue.length) {} else { stopPlayback(); ws.send(JSON.stringify({type: "interrupt"})); }  // barge-in
+    $("you").textContent = ""; $("bot").textContent = "";
+    stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}});
+    mic = new AudioContext({sampleRate: 16000});
+    await mic.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], {type: "application/javascript"})));
+    node = new AudioWorkletNode(mic, "p");
+    node.port.onmessage = e => {
+      const b = new Uint8Array(e.data); let s = ""; for (const x of b) s += String.fromCharCode(x);
+      ws.send(JSON.stringify({type: "audio", data: btoa(s)}));
+    };
+    mic.createMediaStreamSource(stream).connect(node);
+    live = true; $("talk").textContent = "Done speaking"; $("talk").classList.add("live"); $("status").textContent = "Listening…";
+  } else {
+    stream.getTracks().forEach(t => t.stop()); await mic.close(); live = false;
+    ws.send(JSON.stringify({type: "end"}));
+    $("talk").textContent = "Start talking"; $("talk").classList.remove("live"); $("status").textContent = "Thinking…";
+  }
+};
+</script></main></body></html>

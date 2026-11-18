@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxFlow latency dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#E8EEF3;--panel:#F7FAFC;--ink:#0F1E2E;--mute:#52667A;--line:#C5D1DC;--stt:#4B3FE0;--plan:#E9A23B;--llm:#14A39A;--tts:#D9486B}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 "Bricolage Grotesque",system-ui,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:40px 20px 64px}
+h1{font:800 clamp(30px,5vw,52px)/1.05 inherit;letter-spacing:-.02em;margin:0 0 8px;max-width:20ch}
+.sub{color:var(--mute);max-width:62ch;margin:0 0 32px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:24px;margin-bottom:24px}
+h2{font:600 18px/1.3 inherit;margin:0 0 4px}
+.seg{display:flex;flex-wrap:wrap;gap:6px;margin:16px 0 24px}
+.seg button{font:inherit;padding:6px 14px;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+button:focus-visible{outline:3px solid var(--stt);outline-offset:2px}
+.wf{display:flex;height:64px;border-radius:4px;overflow:hidden;background:var(--line)}
+.wf div{display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:14px;transition:flex-basis .35s;min-width:0;overflow:hidden}
+.legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;font-size:14px;color:var(--mute)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:20px;margin-top:24px}
+.stats b{display:block;font-size:28px;font-weight:800;letter-spacing:-.02em}
+.stats span{color:var(--mute);font-size:14px}
+svg{width:100%;height:auto;display:block}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:8px 10px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:600;color:var(--mute);font-size:14px}
+.wrap{overflow-x:auto}
+.empty{padding:40px;text-align:center;color:var(--mute)}
+@media (prefers-reduced-motion:reduce){.wf div{transition:none}}
+</style>
+</head>
+<body>
+<main>
+  <h1 id="headline">Loading benchmark…</h1>
+  <p class="sub" id="sub"></p>
+  <section class="panel" aria-labelledby="h-wf">
+    <h2 id="h-wf">Where the time goes after you stop talking</h2>
+    <p class="sub" style="margin:0">Average per-turn breakdown, by number of simultaneous callers.</p>
+    <div class="seg" id="seg" role="group" aria-label="Concurrent sessions"></div>
+    <div class="wf" id="wf" role="img" aria-label="Latency breakdown"></div>
+    <div class="legend">
+      <span><i style="background:var(--stt)"></i>Speech recognition</span>
+      <span><i style="background:var(--plan)"></i>Agent plan and tools</span>
+      <span><i style="background:var(--llm)"></i>LLM first token</span>
+      <span><i style="background:var(--tts)"></i>First audio synthesized</span>
+    </div>
+    <div class="stats" id="stats"></div>
+  </section>
+  <section class="panel" aria-labelledby="h-ch">
+    <h2 id="h-ch">Response time as load grows</h2>
+    <p class="sub" style="margin:0 0 12px">Time from end of speech to first audio. Median and 95th percentile.</p>
+    <svg id="chart" viewBox="0 0 900 320" role="img" aria-label="End-to-end latency by concurrency"></svg>
+  </section>
+  <section class="panel" aria-labelledby="h-tb">
+    <h2 id="h-tb" style="margin-bottom:12px">All runs</h2>
+    <div class="wrap"><table id="tbl"></table></div>
+  </section>
+  <p class="sub" id="foot"></p>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const C = {stt:"#4B3FE0", plan:"#E9A23B", llm:"#14A39A", tts:"#D9486B"};
+const ms = v => v >= 1000 ? (v/1000).toFixed(2)+" s" : Math.round(v)+" ms";
+let D, cur = 0;
+
+fetch("benchmark.json", {cache:"no-cache"}).then(r => { if(!r.ok) throw 0; return r.json(); }).then(d => { D = d; init(); })
+  .catch(() => { $("headline").textContent = "No benchmark data yet"; $("sub").textContent = "Run python -m voxflow.benchmark on a machine with the models running, commit dashboard/benchmark.json, then reload this page."; });
+
+function init(){
+  const L = D.levels, ok = L.filter(l => l.e2e.p95 < 1500).pop() || L[0];
+  $("headline").textContent = `First audio in ${ms(L[0].e2e.p50)} for one caller; stays under 1.5 s p95 up to ${ok.concurrency} callers`;
+  $("sub").textContent = `Measured on real models: ${D.stt}, ${D.llm}, ${D.tts}. Each run speaks real audio through the full streaming pipeline.`;
+  $("seg").innerHTML = L.map((l,i) => `<button aria-pressed="${i==cur}" data-i="${i}">${l.concurrency} ${l.concurrency==1?"caller":"callers"}</button>`).join("");
+  $("seg").onclick = e => { const b = e.target.closest("button"); if(b){ cur = +b.dataset.i; render(); } };
+  render(); chart();
+  $("tbl").innerHTML = "<tr><th>Callers</th><th>TTFT p50</th><th>E2E p50</th><th>E2E p95</th><th>E2E p99</th><th>Turns/s</th><th>Fallback</th><th>Retries</th></tr>" +
+    L.map(l => `<tr><td>${l.concurrency}</td><td>${ms(l.ttft.p50)}</td><td>${ms(l.e2e.p50)}</td><td>${ms(l.e2e.p95)}</td><td>${ms(l.e2e.p99)}</td><td>${l.throughput_tps}</td><td>${(l.fallback_rate*100).toFixed(1)}%</td><td>${l.retries}</td></tr>`).join("");
+  $("foot").textContent = "Generated " + new Date(D.generated).toLocaleString();
+}
+function render(){
+  const l = D.levels[cur], s = l.stages, tot = Object.values(s).reduce((a,b)=>a+Math.max(b,0),0);
+  document.querySelectorAll("#seg button").forEach((b,i)=>b.setAttribute("aria-pressed", i==cur));
+  $("wf").innerHTML = Object.keys(C).map(k => `<div style="flex-basis:${Math.max(s[k],0)/tot*100}%;background:${C[k]}">${s[k]>tot*.07?ms(s[k]):""}</div>`).join("");
+  $("stats").innerHTML = [["Median first audio",ms(l.e2e.p50)],["95th percentile",ms(l.e2e.p95)],["Median first token",ms(l.ttft.p50)],["Throughput",l.throughput_tps+" turns/s"],["Turns served on fallback",(l.fallback_rate*100).toFixed(1)+"%"]]
+    .map(([a,b])=>`<div><b>${b}</b><span>${a}</span></div>`).join("");
+}
+function chart(){
+  const L = D.levels, W=900,H=320,p={l:60,r:20,t:16,b:40}, max = Math.max(...L.map(l=>l.e2e.p95))*1.1;
+  const x = i => p.l + i*(W-p.l-p.r)/(L.length-1||1), y = v => H-p.b-(v/max)*(H-p.t-p.b);
+  let g = "";
+  for(let k=0;k<=4;k++){ const v=max*k/4; g += `<line x1="${p.l}" x2="${W-p.r}" y1="${y(v)}" y2="${y(v)}" stroke="#C5D1DC"/><text x="${p.l-8}" y="${y(v)+4}" text-anchor="end" font-size="12" fill="#52667A">${ms(v)}</text>`; }
+  const line = (key,col,dash) => `<polyline fill="none" stroke="${col}" stroke-width="3" ${dash?'stroke-dasharray="6 5"':""} points="${L.map((l,i)=>x(i)+","+y(l.e2e[key])).join(" ")}"/>` + L.map((l,i)=>`<circle cx="${x(i)}" cy="${y(l.e2e[key])}" r="4" fill="${col}"/>`).join("");
+  const sla = `<line x1="${p.l}" x2="${W-p.r}" y1="${y(1500)}" y2="${y(1500)}" stroke="#D9486B" stroke-dasharray="2 4"/><text x="${W-p.r}" y="${y(1500)-6}" text-anchor="end" font-size="12" fill="#D9486B">1.5 s target</text>`;
+  const xl = L.map((l,i)=>`<text x="${x(i)}" y="${H-14}" text-anchor="middle" font-size="12" fill="#52667A">${l.concurrency}</text>`).join("");
+  $("chart").innerHTML = g + sla + line("p95","#4B3FE0",true) + line("p50","#14A39A") + xl +
+    `<text x="${W/2}" y="${H}" text-anchor="middle" font-size="12" fill="#52667A" dy="-0">concurrent callers</text>
+     <text x="${W-p.r}" y="${y(L.at(-1).e2e.p50)-10}" text-anchor="end" font-size="13" fill="#14A39A">median</text>
+     <text x="${W-p.r}" y="${y(L.at(-1).e2e.p95)-10}" text-anchor="end" font-size="13" fill="#4B3FE0">p95</text>`;
+}
+</script>
+</body>
+</html>

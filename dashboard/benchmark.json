@@ -1,0 +1,83 @@
+{
+  "generated": "2026-11-18T04:43:16+00:00",
+  "stt": "faster-whisper base.en (cpu)",
+  "llm": "qwen2.5:1.5b",
+  "tts": "edge-tts en-US-AriaNeural",
+  "levels": [
+    {
+      "concurrency": 1,
+      "turns": 2,
+      "ttft": {
+        "p50": 1073.2,
+        "p95": 1073.2,
+        "p99": 1073.2,
+        "mean": 1016.3
+      },
+      "e2e": {
+        "p50": 2334.7,
+        "p95": 2334.7,
+        "p99": 2334.7,
+        "mean": 2186.3
+      },
+      "throughput_tps": 0.46,
+      "fallback_rate": 0.0,
+      "retries": 0,
+      "stages": {
+        "stt": 388.4,
+        "plan": 4.3,
+        "llm": 623.6,
+        "tts": 1170.0
+      }
+    },
+    {
+      "concurrency": 2,
+      "turns": 4,
+      "ttft": {
+        "p50": 1311.6,
+        "p95": 1570.3,
+        "p99": 1570.3,
+        "mean": 1190.8
+      },
+      "e2e": {
+        "p50": 2568.2,
+        "p95": 2914.3,
+        "p99": 2914.3,
+        "mean": 2476.3
+      },
+      "throughput_tps": 0.64,
+      "fallback_rate": 0.0,
+      "retries": 0,
+      "stages": {
+        "stt": 634.3,
+        "plan": 2.9,
+        "llm": 553.6,
+        "tts": 1285.5
+      }
+    },
+    {
+      "concurrency": 4,
+      "turns": 8,
+      "ttft": {
+        "p50": 2508.1,
+        "p95": 2892.4,
+        "p99": 2892.4,
+        "mean": 1962.8
+      },
+      "e2e": {
+        "p50": 3483.3,
+        "p95": 4249.8,
+        "p99": 4249.8,
+        "mean": 3302.8
+      },
+      "throughput_tps": 1.1,
+      "fallback_rate": 0.0,
+      "retries": 0,
+      "stages": {
+        "stt": 1138.0,
+        "plan": 71.2,
+        "llm": 753.7,
+        "tts": 1339.9
+      }
+    }
+  ]
+}
